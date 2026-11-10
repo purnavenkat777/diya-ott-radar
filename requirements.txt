@@ -1,0 +1,1 @@
+# Diya OTT Radar currently uses only the Python standard library.
