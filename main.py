@@ -351,59 +351,62 @@ def roundup_titles(item: Candidate) -> list[str]:
     return results[:12]
 
 
-def build_report(items: list[Candidate], now: datetime | None = None, max_items: int = 15) -> str:
+def telegram_link(title: str, url: str) -> str:
+    """Return a safe Telegram HTML link with no visible long URL."""
+    parsed = urlparse(url)
+    safe_title = html.escape(title, quote=False)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return safe_title
+    safe_url = html.escape(url, quote=True)
+    return f'<a href="{safe_url}">{safe_title}</a>'
+
+
+def short_telugu_status(item: Candidate) -> str:
+    """Concise article-based Telugu-language hint; never claim catalogue verification."""
+    text = item.searchable_text
+    if AUDIO_RE.search(text):
+        return "Telugu audio mentioned*"
+    if DUB_RE.search(text):
+        return "Telugu dub mentioned*"
+    if ORIGINAL_RE.search(text):
+        return "Original Telugu*"
+    return "Telugu audio unclear"
+
+
+def build_report(items: list[Candidate], now: datetime | None = None, max_items: int = 8) -> str:
+    """Build a compact Telegram report. Article URLs are embedded in clickable titles."""
     now = now or datetime.now(IST)
     relevant = [item for item in items if is_relevant(item)]
     specific = [item for item in relevant if not is_roundup(item)]
     roundups = [item for item in relevant if is_roundup(item)]
 
     lines = [
-        "🎬 DIYA OTT RADAR · V2",
-        f"Weekly Telugu OTT discovery · {now.astimezone(IST):%A, %d %B %Y}",
-        "Original Telugu + Telugu-dubbed movie leads",
-        "",
-        f"Film-specific stories: {min(len(specific), max_items)} · Roundup references: {min(len(roundups), 4)}",
+        "🎬 <b>DIYA OTT RADAR</b>",
+        f"Telugu OTT updates · {now.astimezone(IST):%d %b %Y}",
         "",
     ]
 
     if specific:
-        lines.append("🎞 FILM-SPECIFIC STORIES")
+        lines.append("<b>🎞 FILM-SPECIFIC STORIES</b>")
         for index, item in enumerate(specific[:max_items], 1):
-            platforms = ", ".join(platform_names(item)) or "Platform not identified in source"
-            release = extract_release_date(item) or "Not clearly stated in source"
+            platforms = ", ".join(platform_names(item)) or "Platform not stated"
+            release = extract_release_date(item) or "Date not stated"
+            title = telegram_link(display_story_title(item), item.article_url)
             lines.extend([
-                f"{index}. {display_story_title(item)}",
-                f"📺 Platform: {platforms}",
-                f"🗓 OTT date: {release}",
-                f"🎧 Telugu check: {telugu_evidence(item)}",
-                f"📰 Article: {item.publisher} · {format_article_date(item.published)}",
-                f"🔗 {item.article_url}",
-                "",
+                f"{index}. {title}",
+                f"   📺 {html.escape(platforms)} · 🗓 {html.escape(release)} · 🎧 {html.escape(short_telugu_status(item))}",
             ])
     else:
-        lines.extend(["🎞 FILM-SPECIFIC STORIES", "No strong single-film OTT announcement was found in the monitored feeds.", ""])
+        lines.extend(["<b>🎞 FILM-SPECIFIC STORIES</b>", "No strong single-film OTT announcement found."])
 
     if roundups:
-        lines.append("🗂 WEEKLY ROUNDUP REFERENCES")
-        for item in roundups[:4]:
-            mentioned = roundup_titles(item)
-            lines.extend([
-                f"• {display_story_title(item)}",
-                f"  {item.publisher} · {format_article_date(item.published)}",
-            ])
-            if mentioned:
-                lines.append("  Titles surfaced in article headings (verify individually):")
-                lines.extend(f"  - {title}" for title in mentioned[:8])
-            else:
-                lines.append("  Individual movie names could not be extracted reliably from the page.")
-            lines.append(f"  {item.article_url}")
-        lines.append("")
+        lines.extend(["", "<b>🗂 WEEKLY ROUNDUP REFERENCES</b>"])
+        for item in roundups[:2]:
+            lines.append(f"• {telegram_link(display_story_title(item), item.article_url)}")
 
     lines.extend([
-        "⚠️ VERIFICATION NOTE",
-        "These are publisher-discovery leads, not a verified OTT catalogue. An article mention does not prove the movie is streaming today or that Telugu audio is available. Check the title page's Audio / Languages section in the OTT app before watching.",
-        "Platforms monitored in searches: Netflix · Prime Video · JioHotstar · ZEE5 · aha · Sony LIV · Sun NXT · ETV Win",
         "",
+        "<i>*This is a publisher-discovery feed, not a verified OTT catalogue. Check Audio/Languages in the OTT app.</i>",
         "— Diya OTT Radar",
     ])
     return "\n".join(lines)
@@ -425,7 +428,7 @@ def telegram_send(token: str, chat_id: str, message: str) -> None:
         chunks.append(current)
 
     for chunk in chunks:
-        data = json.dumps({"chat_id": chat_id, "text": chunk, "disable_web_page_preview": True}).encode("utf-8")
+        data = json.dumps({"chat_id": chat_id, "text": chunk, "parse_mode": "HTML", "disable_web_page_preview": True}).encode("utf-8")
         request = urllib.request.Request(
             f"{TELEGRAM_API}/bot{token}/sendMessage",
             data=data,
