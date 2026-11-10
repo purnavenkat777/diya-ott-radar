@@ -1,45 +1,58 @@
-
 name: Diya OTT Radar
 
 on:
   schedule:
+    # 02:30 UTC = 08:00 IST (UTC+05:30), every Friday.
     - cron: "30 2 * * 5"
-
   workflow_dispatch:
     inputs:
-      send_test:
-        description: "Send Telegram connection test only"
+      test_only:
+        description: "Send a Telegram connection test only"
         required: false
-        default: false
+        default: "false"
         type: boolean
 
 permissions:
   contents: read
 
+concurrency:
+  group: diya-ott-radar
+  cancel-in-progress: false
+
 jobs:
   send-report:
     runs-on: ubuntu-latest
-
+    timeout-minutes: 10
     steps:
-      - name: Checkout repository
+      - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: "pip"
 
-      - name: Test Telegram connection
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.send_test }}
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run automated tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Send Telegram connection test
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.test_only == true }}
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python main.py --test
 
-      - name: Discover OTT releases and send report
-        if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && !inputs.send_test) }}
+      - name: Discover OTT leads and send report
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.test_only == true) }}
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          MAX_ITEMS: "20"
+          MAX_ITEMS: ${{ vars.MAX_ITEMS || '20' }}
+          OTT_FEEDS: ${{ vars.OTT_FEEDS }}
         run: python main.py
